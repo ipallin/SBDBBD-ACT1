@@ -23,3 +23,10 @@ services:
       MONGO_HOST: mongo
       MONGO_DATABASE: tienda
       ELASTIC_HOST: elasticsearch
+  elastic_init:
+    image: curlimages/curl
+    depends_on:
+      - elasticsearch
+    entrypoint: ["/bin/sh", "/init_elastic.sh"]
+    volumes:
+      - ./init_elastic.sh:/init_elastic.sh
