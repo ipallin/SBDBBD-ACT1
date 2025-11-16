@@ -1,3 +1,4 @@
+# Deps base
 fastapi>=0.95.0,<1.0
 uvicorn[standard]>=0.23.0,<1.0
 python-multipart>=0.0.6
@@ -9,12 +10,10 @@ alembic>=1.10.0
 httpx>=0.24.0
 python-dotenv>=1.0.0
 loguru>=0.7.0
-
-# Database / HTTP clients used by the app
 pymongo>=4.3.0
 requests>=2.31.0
 
-# Testing / dev
+# Testing 
 pytest>=7.3.2
 pytest-asyncio>=0.21.0
 mypy>=1.9.0

@@ -13,7 +13,7 @@ ES_PORT="${ES_PORT:-9200}"
 ES_USER="${ES_USER:-}"
 ES_PASS="${ES_PASS:-}"
 ES_URL="http://${ES_HOST}:${ES_PORT}"
-INDEX="sample-index"
+INDEX="articulos"
 
 # Construir opción de autenticación si se proporcionó usuario
 AUTH_OPTS=()
@@ -53,17 +53,17 @@ curl -sS "${AUTH_OPTS[@]}" -X PUT "${ES_URL}/${INDEX}" -H 'Content-Type: applica
     }
 }' >/dev/null
 
-echo "Insertando documentos de ejemplo (bulk)..."
-cat <<'NDJSON' | curl -sS "${AUTH_OPTS[@]}" -X POST "${ES_URL}/_bulk?refresh=wait_for" -H 'Content-Type: application/x-ndjson' --data-binary @-
-{ "index": { "_index": "sample-index", "_id": "1" } }
+echo "Insertando documentos simples en '${INDEX}' (bulk)..."
+cat <<NDJSON | curl -sS "${AUTH_OPTS[@]}" -X POST "${ES_URL}/_bulk?refresh=wait_for" -H 'Content-Type: application/x-ndjson' --data-binary @-
+{ "index": { "_index": "${INDEX}", "_id": "1" } }
 { "title": "Primera entrada", "content": "Documento de prueba número uno.", "date": "2023-01-10T12:00:00Z", "tags": ["prueba","inicio"], "views": 10 }
-{ "index": { "_index": "sample-index", "_id": "2" } }
+{ "index": { "_index": "${INDEX}", "_id": "2" } }
 { "title": "Segunda entrada", "content": "Más contenido de ejemplo.", "date": "2023-02-15T08:30:00Z", "tags": ["ejemplo"], "views": 25 }
-{ "index": { "_index": "sample-index", "_id": "3" } }
+{ "index": { "_index": "${INDEX}", "_id": "3" } }
 { "title": "Tercera entrada", "content": "Documentación y datos de prueba.", "date": "2023-03-20T16:45:00Z", "tags": ["prueba","docs"], "views": 5 }
-{ "index": { "_index": "sample-index", "_id": "4" } }
-{ "title": "Entrada con tags", "content": "Busqueda por tags.", "date": "2023-04-01T10:00:00Z", "tags": ["tags","busqueda"], "views": 7 }
-{ "index": { "_index": "sample-index", "_id": "5" } }
+{ "index": { "_index": "${INDEX}", "_id": "4" } }
+{ "title": "Entrada con tags", "content": "Búsqueda por tags.", "date": "2023-04-01T10:00:00Z", "tags": ["tags","busqueda"], "views": 7 }
+{ "index": { "_index": "${INDEX}", "_id": "5" } }
 { "title": "Última entrada", "content": "Último ejemplo para pruebas.", "date": "2023-05-05T09:15:00Z", "tags": ["final"], "views": 3 }
 NDJSON
 
