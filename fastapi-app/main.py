@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query, Depends  # Se agregó Depends (reservado para futuras dependencias de seguridad)
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, root_validator
 from pymongo import MongoClient
 import os
 import requests
@@ -8,9 +8,25 @@ app = FastAPI(title="API NoSQL (segura)")
 
 MONGO_HOST = os.getenv("MONGO_HOST", "mongo")
 MONGO_DB = os.getenv("MONGO_DATABASE", "tienda")
-MONGO_USER = os.getenv("MONGO_USER", "api_user")
-MONGO_PASS = os.getenv("MONGO_PASS", "api1234")
+# Credenciales sensibles: forzar su lectura desde el entorno (.env). No usar
+# valores por defecto inseguros; fallamos al arrancar si faltan.
+MONGO_USER = os.getenv("MONGO_USER")
+MONGO_PASS = os.getenv("MONGO_PASS")
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "elasticsearch")
+# Credenciales de aplicación para Elasticsearch (no usar el superuser `elastic`)
+ELASTIC_APP_USER = os.getenv("ELASTIC_APP_USER")
+ELASTIC_APP_PASS = os.getenv("ELASTIC_APP_PASS")
+
+# Validar presencia de variables sensibles en tiempo de arranque para evitar
+# comportamientos inseguros por usar credenciales por defecto.
+missing = [k for k, v in {
+    "MONGO_USER": MONGO_USER,
+    "MONGO_PASS": MONGO_PASS,
+    "ELASTIC_APP_USER": ELASTIC_APP_USER,
+    "ELASTIC_APP_PASS": ELASTIC_APP_PASS,
+}.items() if not v]
+if missing:
+    raise RuntimeError(f"Faltan variables de entorno sensibles: {', '.join(missing)}.\nPlease set them in .env before starting the app.")
 
 mongo = MongoClient(
     host=MONGO_HOST,
@@ -21,29 +37,46 @@ mongo = MongoClient(
 db = mongo[MONGO_DB]
 
 
+def validate_no_operators_recursive(data: dict):
+    """Validación recursiva para estructuras anidadas.
+    - Claves que empiezan por '$'
+    - Valores string que empiezan por '$' o contienen '$'
+    - Dicts anidados se procesan recursivamente
+    Diseñado para usarse desde validadores raíz de Pydantic.
+    Lanza `ValueError` para integrarse con la validación de Pydantic.
+    """
+    for k, v in data.items():
+        if isinstance(k, str) and k.startswith("$"):
+            raise ValueError("Clave con operador Mongo")
+        if isinstance(v, dict):
+            validate_no_operators_recursive(v)
+        elif isinstance(v, str) and v.strip().startswith("$"):
+            raise ValueError("Valor con operador Mongo")
+        elif isinstance(v, str) and "$" in v:
+            raise ValueError("Caracter '$' bloqueado")
+
+
 class Login(BaseModel):
     username: str
     password: str
 
-    @validator("*")
-    def no_mongo_operators(cls, v):
-        # Validador genérico sobre todos los campos: bloquea
-        # 1) Cualquier dict (evita inyección de operadores complejos)
-        # 2) Strings que comiencen por '$' (operadores Mongo como $ne, $gt, etc.)
-        # 3) Presencia de '$' en cualquier parte del string (defensa mínima solicitada)
-        if isinstance(v, dict):
-            raise ValueError("Payload no permitido")
-        if isinstance(v, str) and v.strip().startswith("$"):
-            raise ValueError("Operadores no permitidos")
-        if isinstance(v, str) and "$" in v:
-            raise ValueError("Caracter '$' bloqueado")
-        return v
+    @root_validator(pre=True)
+    def check_no_operators(cls, values):
+        # Validación centralizada para bloquear operadores Mongo en cualquier parte del payload
+        validate_no_operators_recursive(values)
+        return values
 
 
 class Pedido(BaseModel):
     producto: str
     cantidad: int
     usuario: str
+
+    @root_validator(pre=True)
+    def check_no_operators(cls, values):
+        # Validación centralizada para bloquear operadores Mongo en cualquier parte del payload
+        validate_no_operators_recursive(values)
+        return values
 
     @validator("cantidad")
     def cantidad_positiva(cls, v):
@@ -52,17 +85,9 @@ class Pedido(BaseModel):
             raise ValueError("La cantidad debe ser positiva")
         return v
 
-    @validator("producto", "usuario")
-    def no_mongo_operator_strings(cls, v):
-        # Mismo patrón defensivo: bloquea aparición de '$' (operadores Mongo)
-        if isinstance(v, str) and (v.strip().startswith("$") or "$" in v):
-            raise ValueError("Operadores Mongo bloqueados")
-        return v
-
 
 def validate_no_operators(data: dict):
     """Validación recursiva para estructuras anidadas.
-    Recorre cada clave/valor y bloquea:
     - Claves que empiezan por '$'
     - Valores string que empiezan por '$' o contienen '$'
     - Dicts anidados se procesan recursivamente
@@ -112,7 +137,7 @@ def login(data: Login):
 
 @app.get("/pedidos")
 def listar_pedidos(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200)):
-    # Paginación añadida: evita devolver listas masivas y facilita control de uso.
+    # evita devolver listas masivas y facilita control de uso
     skip = (page - 1) * size
     cursor = db.pedidos.find({}, {"_id": 0}).skip(skip).limit(size)
     pedidos = list(cursor)
@@ -122,9 +147,8 @@ def listar_pedidos(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=20
 
 @app.post("/pedidos")
 def crear_pedido(pedido: Pedido):
-    # Se valida recursivamente para prevenir claves tipo $set, $ne, etc. antes de insertar.
+    # El modelo Pedido ya valida recursivamente 
     payload = pedido.dict()
-    validate_no_operators(payload)
     db.pedidos.insert_one(payload)
     return {"msg": "pedido_creado"}
 
@@ -138,25 +162,27 @@ def art_search(
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=50),
 ):
-    # Defensa mínima: prohibir '*' o vacío para evitar escaneos masivos.
+    # prohibir '*' o vacío para evitar escaneos
     if q.strip() == "*" or q.strip() == "":
         raise HTTPException(status_code=422, detail="Búsqueda demasiado amplia")
 
-    # Bloqueo de patrones básicos potencialmente abusivos.
+    # bloqueo de patrones basicos
     forbidden = ["..", "<", ">", ";"]
     if any(f in q for f in forbidden):
         raise HTTPException(status_code=422, detail="Patrón de búsqueda no permitido")
 
-    # Escape de caracteres reservados para evitar interpretaciones especiales.
+    # escape de caracteres reservados
     sanitized = escape_es_query(q)
     url = f"http://{ELASTIC_HOST}:9200/articulos/_search"
     params = {"q": sanitized, "size": size, "from": (page - 1) * size}
+    auth = (ELASTIC_APP_USER, ELASTIC_APP_PASS)
     try:
-        resp = requests.get(url, params=params, timeout=3)
+        # Usamos autenticación HTTP Basic con el usuario de aplicación.
+        resp = requests.get(url, params=params, timeout=3, auth=auth)
         if resp.status_code in (401, 403):
             raise HTTPException(status_code=resp.status_code, detail="No autorizado")
         data = resp.json()
-        # Metadatos de paginación devueltos junto con la respuesta de ES.
+        # Metadatos de paginación devueltos
         data["page"] = page
         data["size"] = size
         return data

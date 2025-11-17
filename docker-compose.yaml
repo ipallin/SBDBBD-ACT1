@@ -15,8 +15,13 @@ services:
       MONGO_RW_USER: ${MONGO_RW_USER}
       MONGO_RW_PASS: ${MONGO_RW_PASS}
     volumes:
-      - ./init_mongo.js:/docker-entrypoint-initdb.d/01-init_mongo.js:ro
-      - ./scripts/init_users.sh:/docker-entrypoint-initdb.d/02-init_users.sh:ro
+      # Un único script de inicialización que: crea usuarios de autenticación
+      # (si se proporcionan en .env) y añade datos de ejemplo. Mantener en este
+      # archivo evita duplicación y simplifica la configuración inicial.
+      - ./init/init_mongo.sh:/docker-entrypoint-initdb.d/01-init_mongo.sh:ro
+    env_file:
+      - .env
+
     command: ["mongod", "--auth"] # Hace el enforce de la autenticación de Mongo
 
   elasticsearch:
@@ -28,6 +33,16 @@ services:
       discovery.type: single-node
       xpack.security.enabled: "true"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      # Se requiere una contraseña de arranque para el usuario 'elastic'.
+      # Esto obliga a la autenticación para la API HTTP y evita acceso
+      # anónimo (proteger contra llamadas tipo `curl http://localhost:9200`).
+      # La contraseña se carga desde `.env` mediante la variable `ELASTIC_PASSWORD`.
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+    # Cargar valores sensibles (contraseñas) desde un archivo .env que NO debe
+    # subirse al control de versiones. Facilita la gestión de secretos sin
+    # hardcodearlos en el YML.
+    env_file:
+      - .env
 
   fastapi-app:
     build: ./fastapi-app
@@ -40,8 +55,8 @@ services:
     environment:
       MONGO_HOST: mongo  # Host interno del contenedor Mongo en la red de Docker
       MONGO_DATABASE: tienda  # Base de datos de trabajo de la app
-      MONGO_USER: ${MONGO_APP_USER}  # Usuario de aplicación definido en .env, con rol limitado
-      MONGO_PASS: ${MONGO_APP_PASS}  # Contraseña de la app definida en .env, no hardcodeada
+      MONGO_USER: ${MONGO_APP_USER}  # Usuario de aplicación definido en .env
+      MONGO_PASS: ${MONGO_APP_PASS}  # Contraseña de la app definida en .env
       ELASTIC_HOST: elasticsearch
       APP_MODE: secure
     command: uvicorn main:app --host 0.0.0.0 --port 8000
