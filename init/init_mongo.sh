@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# init_mongo.sh
 # Único script de inicialización para Mongo: crea usuarios de autenticación
-# (si se proporcionan), y añade datos de ejemplo en la BD `tienda`.
-# Se debe ejecutar desde el entrypoint de la imagen oficial de Mongo (./docker-entrypoint-initdb.d)
 
 DB_NAME="${MONGO_INITDB_DATABASE:-tienda}"
 APP_USER="${MONGO_APP_USER:-}"
@@ -16,8 +13,7 @@ echo "[init] Inicializando base de datos Mongo: $DB_NAME"
 
 echo "[init] Variables detectadas: APP_USER=${APP_USER:+set}, RW_USER=${RW_USER:+set}"
 
-# Ejecutamos comandos JS con mongosh. El entrypoint de la imagen garantiza que
-# mongod esté disponible en este punto durante la primera inicialización.
+# Ejecutamos comandos JS con mongosh
 
 mongosh <<EOF
 // Nos movemos a la base de datos de trabajo
