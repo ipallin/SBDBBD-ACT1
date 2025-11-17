@@ -1,11 +1,15 @@
-from fastapi import FastAPI, HTTPException, Query, Depends  # Se agregó Depends (reservado para futuras dependencias de seguridad)
+from fastapi import FastAPI, HTTPException, Query, Depends, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, validator, root_validator
 from pymongo import MongoClient
 import os
 import requests
 
 app = FastAPI(title="API NoSQL (segura)")
-
+# -----------------------------
+# MongoDB (conexión y configuración)
+# - Variables y cliente que usan la API para operaciones de datos (usuarios, pedidos)
+# -----------------------------
 MONGO_HOST = os.getenv("MONGO_HOST", "mongo")
 MONGO_DB = os.getenv("MONGO_DATABASE", "tienda")
 # Credenciales sensibles: forzar su lectura desde el entorno (.env). No usar
@@ -13,9 +17,47 @@ MONGO_DB = os.getenv("MONGO_DATABASE", "tienda")
 MONGO_USER = os.getenv("MONGO_USER")
 MONGO_PASS = os.getenv("MONGO_PASS")
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "elasticsearch")
+
+# -----------------------------
+# Elasticsearch (búsquedas)
+# - Credenciales y host usados exclusivamente para consultas a ES desde la API
+# - No usar el superuser `elastic` desde la aplicación; usar un usuario con
+#   permisos limitados (ej. índice `articulos` read/write).
+# -----------------------------
 # Credenciales de aplicación para Elasticsearch (no usar el superuser `elastic`)
 ELASTIC_APP_USER = os.getenv("ELASTIC_APP_USER")
 ELASTIC_APP_PASS = os.getenv("ELASTIC_APP_PASS")
+
+# API authentication: prefer explicit API credentials, fall back to elastic app creds
+API_USER = os.getenv("API_USER")
+API_PASS = os.getenv("API_PASS")
+
+# HTTP Basic security dependency for endpoints that must be protected
+security = HTTPBasic()
+
+import secrets
+
+def verify_api_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verifica credenciales HTTP Basic contra variables de entorno.
+    - Usa `API_USER`/`API_PASS` si están definidas; si no, usa
+      `ELASTIC_APP_USER`/`ELASTIC_APP_PASS`.
+    Lanza `HTTPException(401)` con el header `WWW-Authenticate` si no coinciden.
+    """
+    expected_user = API_USER or ELASTIC_APP_USER
+    expected_pass = API_PASS or ELASTIC_APP_PASS
+    if not expected_user or not expected_pass:
+        raise HTTPException(status_code=500, detail="API credentials not configured on server")
+
+    # Comparación segura en tiempo constante
+    valid_user = secrets.compare_digest(credentials.username, expected_user)
+    valid_pass = secrets.compare_digest(credentials.password, expected_pass)
+    if not (valid_user and valid_pass):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 # Validar presencia de variables sensibles en tiempo de arranque para evitar
 # comportamientos inseguros por usar credenciales por defecto.
@@ -118,6 +160,12 @@ def escape_es_query(q: str) -> str:
     return "".join(escaped)
 
 
+# -----------------------------
+# Endpoints que usan MongoDB
+# - `/login_mongo`, `/pedidos`, etc. leen/escriben datos en la base Mongo
+# -----------------------------
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "mode": "secure"}
@@ -151,6 +199,15 @@ def crear_pedido(pedido: Pedido):
     payload = pedido.dict()
     db.pedidos.insert_one(payload)
     return {"msg": "pedido_creado"}
+
+
+# -----------------------------
+# Endpoint que usa Elasticsearch
+# - `/articulos` delega la búsqueda en Elasticsearch y por tanto utiliza
+#   las credenciales `ELASTIC_APP_USER`/`ELASTIC_APP_PASS` para autenticarse.
+# - La API actúa como proxy seguro y aplica validaciones/escapes antes de
+#   pasar la consulta a ES.
+# -----------------------------
 
 
 @app.get("/articulos")
