@@ -16,6 +16,7 @@ MONGO_DB = os.getenv("MONGO_DATABASE", "tienda")
 # valores por defecto inseguros; fallamos al arrancar si faltan.
 MONGO_USER = os.getenv("MONGO_USER")
 MONGO_PASS = os.getenv("MONGO_PASS")
+MONGO_CA = os.getenv("MONGO_CA_FILE", "/app/ca.pem")  # ruta dentro del contenedor
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "elasticsearch")
 
 # -----------------------------
@@ -75,6 +76,9 @@ mongo = MongoClient(
     username=MONGO_USER,
     password=MONGO_PASS,
     authSource=MONGO_DB,
+    tls=True,
+    tlsCAFile=MONGO_CA,
+    tlsAllowInvalidCertificates=False,  # no aceptar certs inválidos en entornos seguros
 )
 db = mongo[MONGO_DB]
 

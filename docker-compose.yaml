@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   mongo:
     image: mongo:7
@@ -15,14 +13,15 @@ services:
       MONGO_RW_USER: ${MONGO_RW_USER}
       MONGO_RW_PASS: ${MONGO_RW_PASS}
     volumes:
-      # Un único script de inicialización que: crea usuarios de autenticación
-      # (si se proporcionan en .env) y añade datos de ejemplo. Mantener en este
-      # archivo evita duplicación y simplifica la configuración inicial.
+      # crea usuarios de autenticación y añade datos de ejemplo
       - ./init/init_mongo.sh:/docker-entrypoint-initdb.d/01-init_mongo.sh:ro
+      - ./certs/mongo.pem:/mongo-certs/mongo.pem
+      - ./certs/ca.pem:/mongo-certs/ca.pem
     env_file:
       - .env
-
-    command: ["mongod", "--auth"] # Hace el enforce de la autenticación de Mongo
+    command: ["mongod", "--auth", "--tlsMode", "requireTLS",
+          "--tlsCertificateKeyFile", "/mongo-certs/mongo.pem",
+          "--tlsCAFile", "/mongo-certs/ca.pem"]
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
@@ -56,7 +55,10 @@ services:
       MONGO_PASS: ${MONGO_APP_PASS}  # Contraseña de la app definida en .env
       ELASTIC_HOST: elasticsearch
       APP_MODE: secure
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
-
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --ssl-keyfile /app/cert.key --ssl-certfile /app/cert.crt
+    volumes:
+      - ./certs/cert.crt:/app/cert.crt:ro
+      - ./certs/cert.key:/app/cert.key:ro
+      - ./certs/ca.pem:/app/ca.pem:ro
     env_file:
       - .env  # Cargamos credenciales sensibles desde un archivo ignorado en Git

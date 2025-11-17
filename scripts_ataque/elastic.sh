@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
 # Elasticsearch abierto
 curl http://localhost:9200/_cat/indices
 curl "http://localhost:9200/articulos/_search?q=*"
